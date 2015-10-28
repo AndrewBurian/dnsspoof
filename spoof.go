@@ -5,7 +5,47 @@ import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
+	"net"
 )
+
+func getIfaceAddr(ifacename string) net.IP {
+
+	// get the list of interfaces
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		panic(err)
+	}
+
+	// loop through them to get our local address
+	for i := range ifaces {
+
+		// check it's the interface we want
+		if ifaces[i].Name != ifacename {
+			continue
+		}
+
+		// get the addresses
+		addrs, err := ifaces[i].Addrs()
+		if err != nil {
+			panic(err)
+		}
+
+		// check to ensure there is an address on this interface
+		if len(addrs) < 1 {
+			panic("No address on target interface")
+		}
+
+		// use the first available address
+		ip, _, err := net.ParseCIDR(addrs[0].String())
+		if err != nil {
+			panic(err)
+		}
+
+		return ip
+
+	}
+	return nil
+}
 
 /*
 Spoof is the entry point for the actual spoofing subroutine.
@@ -15,9 +55,16 @@ queries, and seding responses. It is mostly concerened with
 the packet level logic, and does not manipulate the responses
 themselves
 */
-func spoof() {
+func spoof(ifacename string) {
+
+	// get our local ip
+	ip := getIfaceAddr(ifacename)
+	if ip == nil {
+		panic("Unable to get IP")
+	}
+
 	// open a handle to the network card(s)
-	handle, err := pcap.OpenLive("any", 1600, true, pcap.BlockForever)
+	handle, err := pcap.OpenLive(ifacename, 1600, true, pcap.BlockForever)
 	if err != nil {
 		panic(err)
 	}

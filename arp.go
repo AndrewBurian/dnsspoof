@@ -1,13 +1,13 @@
 package main
 
-import(
-        "github.com/google/gopacket"
-        "github.com/google/gopacket/layers"
-        "github.com/google/gopacket/pcap"
-        "net"
-        "fmt"
-        "time"
-        "os"
+import (
+	"fmt"
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
+	"github.com/google/gopacket/pcap"
+	"net"
+	"os"
+	"time"
 )
 
 func arpPoison(device string, routerMac net.HardwareAddr, routerIP net.IP, localMac net.HardwareAddr, localIP net.IP, victimMac net.HardwareAddr, victimIP net.IP) {
@@ -120,6 +120,6 @@ func arpPoison(device string, routerMac net.HardwareAddr, routerIP net.IP, local
 		/******** end posion arp from router to local ********/
 
 		//Sleep so we don't flood with ARPS
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(5 * time.Second)
 	}
 }

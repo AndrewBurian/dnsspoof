@@ -72,20 +72,20 @@ func spoof(ifacename string) {
 	defer ifaceHandle.Close()
 
 	// set the filter
-	err = ifaceHandle.SetBPFFilter("dst port 53")
+	err = ifaceHandle.SetBPFFilter("udp and dst port 53")
 	if err != nil {
 		// not fatal
 		fmt.Printf("Unable to set filter: %v\n", err.Error())
 	}
 
 	// pre-allocate all the space needed for the layers
-	var ethLayer	layers.Ethernet
-	var ipv4Layer	layers.IPv4
-	var udpLayer	layers.UDP
-	var dnsLayer	layers.DNS
+	var ethLayer layers.Ethernet
+	var ipv4Layer layers.IPv4
+	var udpLayer layers.UDP
+	var dnsLayer layers.DNS
 
-	var q		layers.DNSQuestion
-	var a		layers.DNSResourceRecord
+	var q layers.DNSQuestion
+	var a layers.DNSResourceRecord
 
 	// create the decoder for fast-packet decoding
 	// (using the fast decoder takes about 10% the time of normal decoding)
@@ -105,8 +105,8 @@ func spoof(ifacename string) {
 	// TODO (Optionally) replace with NewSerializeBufferExpectedSize to speed up a bit more
 
 	// set the arguments for serialization
-	serialOpts := gopacket.SerializeOptions {
-		FixLengths: true,
+	serialOpts := gopacket.SerializeOptions{
+		FixLengths:       true,
 		ComputeChecksums: true,
 	}
 
@@ -121,7 +121,12 @@ func spoof(ifacename string) {
 	// Main loop for dns packets intercepted
 	// No new allocations after this point to keep garbage collector
 	// cyles at a minimum
-	for packetData, _, err := ifaceHandle.ReadPacketData(); err == nil; {
+	for {
+		packetData, _, err := ifaceHandle.ZeroCopyReadPacketData()
+
+		if err != nil {
+			break
+		}
 
 		fmt.Println("Got packet from filter")
 
@@ -140,16 +145,21 @@ func spoof(ifacename string) {
 
 		// check that this is not a response
 		if dnsLayer.QR {
-			continue;
+			continue
 		}
 
 		// print the question section
 		for i = 0; i < dnsLayer.QDCount; i++ {
-			//fmt.Println(string(dnsLayer.Questions[i].Name))
+			fmt.Println(string(dnsLayer.Questions[i].Name))
 		}
 
 		// set this to be a response
 		dnsLayer.QR = true
+
+		// if recursion was requested, it is available
+		if dnsLayer.RD {
+			dnsLayer.RA = true
+		}
 
 		// for each question
 		for i = 0; i < dnsLayer.QDCount; i++ {
@@ -159,7 +169,7 @@ func spoof(ifacename string) {
 
 			// verify this is an A-IN record question
 			if q.Type != layers.DNSTypeA || q.Class != layers.DNSClassIN {
-				continue;
+				continue
 			}
 
 			// copy the name across to the response
@@ -204,11 +214,12 @@ func spoof(ifacename string) {
 			panic(err)
 		}
 
+		fmt.Println("Response sent")
+
 		// comment out for debugging
-		//continue
+		continue
 
 		// DEBUGGG--------------------------------------------------------------
-
 
 		err = decoder.DecodeLayers(outbuf.Bytes(), &decodedLayers)
 		if err != nil {

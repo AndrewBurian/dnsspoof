@@ -76,9 +76,6 @@ func spoof(ifacename string) {
 		fmt.Printf("Unable to set filter: %v\n", err.Error())
 	}
 
-	// get the channel source from the card
-	pktSource := gopacket.NewPacketSource(ifaceHandle, ifaceHandle.LinkType())
-
 	// pre-allocate all the space needed for the layers
 	var ethLayer	layers.Ethernet
 	var ipv4Layer	layers.IPv4
@@ -122,12 +119,12 @@ func spoof(ifacename string) {
 	// Main loop for dns packets intercepted
 	// No new allocations after this point to keep garbage collector
 	// cyles at a minimum
-	for packet := range pktSource.Packets() {
+	for packetData, _, err := ifaceHandle.ReadPacketData(); err == nil; {
 
 		fmt.Println("Got packet from filter")
 
 		// decode this packet using the fast decoder
-		err = decoder.DecodeLayers(packet.Data(), &decodedLayers)
+		err = decoder.DecodeLayers(packetData, &decodedLayers)
 		if err != nil {
 			fmt.Println("Decoding error!")
 			continue
@@ -187,9 +184,6 @@ func spoof(ifacename string) {
 		udpLayer.SrcPort = udpLayer.DstPort
 		udpLayer.DstPort = udpPort
 
-		// clear the output buffer
-		outbuf.Clear()
-
 		// set the UDP to be checksummed by the IP layer
 		err = udpLayer.SetNetworkLayerForChecksum(&ipv4Layer)
 		if err != nil {
@@ -207,6 +201,9 @@ func spoof(ifacename string) {
 		if err != nil {
 			panic(err)
 		}
+
+		// comment out for debugging
+		//continue
 
 		// DEBUGGG--------------------------------------------------------------
 

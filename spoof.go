@@ -69,6 +69,8 @@ func spoof(ifacename string) {
 		panic(err)
 	}
 
+	defer ifaceHandle.Close()
+
 	// set the filter
 	err = ifaceHandle.SetBPFFilter("dst port 53")
 	if err != nil {

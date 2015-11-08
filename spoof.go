@@ -124,6 +124,8 @@ func spoof(ifacename string) {
 	// cyles at a minimum
 	for packet := range pktSource.Packets() {
 
+		fmt.Println("Got packet from filter")
+
 		// decode this packet using the fast decoder
 		err = decoder.DecodeLayers(packet.Data(), &decodedLayers)
 		if err != nil {
@@ -144,7 +146,7 @@ func spoof(ifacename string) {
 
 		// print the question section
 		for i = 0; i < dnsLayer.QDCount; i++ {
-			fmt.Println(string(dnsLayer.Questions[i].Name))
+			//fmt.Println(string(dnsLayer.Questions[i].Name))
 		}
 
 		// set this to be a response
@@ -166,6 +168,7 @@ func spoof(ifacename string) {
 
 			// append the answer to the original query packet
 			dnsLayer.Answers = append(dnsLayer.Answers, a)
+			dnsLayer.ANCount = dnsLayer.ANCount + 1
 
 		}
 
@@ -193,23 +196,8 @@ func spoof(ifacename string) {
 			panic(err)
 		}
 
-		// add the data to the udp
-		udpLayer.Payload = dnsLayer.Payload()
-
-		// serialize eth layer
-		err = ethLayer.SerializeTo(outbuf, serialOpts)
-		if err != nil {
-			panic(err)
-		}
-
-		// serialize ip layer
-		err = ipv4Layer.SerializeTo(outbuf, serialOpts)
-		if err != nil {
-			panic(err)
-		}
-
-		// upd layer
-		err = udpLayer.SerializeTo(outbuf, serialOpts)
+		// serialize packets
+		err = gopacket.SerializeLayers(outbuf, serialOpts, &ethLayer, &ipv4Layer, &udpLayer, &dnsLayer)
 		if err != nil {
 			panic(err)
 		}
@@ -219,7 +207,44 @@ func spoof(ifacename string) {
 		if err != nil {
 			panic(err)
 		}
-		fmt.Println("Sent response")
+
+		// DEBUGGG--------------------------------------------------------------
+
+
+		err = decoder.DecodeLayers(outbuf.Bytes(), &decodedLayers)
+		if err != nil {
+			fmt.Println("Decoding error: " + err.Error())
+			continue
+		}
+
+		// only proceed if all layers decoded
+		if len(decodedLayers) != 4 {
+			fmt.Println("Not enough layers!")
+			for j := range decodedLayers {
+				fmt.Println(decodedLayers[j])
+			}
+			continue
+		}
+
+		// print packet
+		fmt.Printf("IP src %v\n", ipv4Layer.SrcIP)
+		fmt.Printf("IP dst %v\n", ipv4Layer.DstIP)
+		fmt.Printf("UDP src port: %v\n", udpLayer.SrcPort)
+		fmt.Printf("UDP dst port: %v\n", udpLayer.DstPort)
+		fmt.Printf("DNS Quy count: %v\n", dnsLayer.QDCount)
+		// print the question section
+		for i = 0; i < dnsLayer.QDCount; i++ {
+			fmt.Printf("%v\n", string(dnsLayer.Questions[i].Name))
+		}
+		fmt.Printf("DNS Ans count: %v\n", dnsLayer.ANCount)
+
+		// print the question section
+		for i = 0; i < dnsLayer.ANCount; i++ {
+			fmt.Printf("%v type %v\n", string(dnsLayer.Answers[i].Name), dnsLayer.Answers[i].Type)
+			fmt.Printf("\t%v\n", dnsLayer.Answers[i].IP)
+		}
+
+		break
 
 	}
 }
